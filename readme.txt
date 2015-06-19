@@ -1,0 +1,1 @@
+Local project host folder for the Community GIS project.

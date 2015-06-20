@@ -1,6 +1,5 @@
 ﻿# test-foldersexist
 
-
 . "c:\myworld\cgis\cgis-book\tests\testglobals.ps1"
 
 $folderList = @("projects","scripts","data")

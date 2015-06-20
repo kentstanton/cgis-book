@@ -1,7 +1,5 @@
 ﻿# test-mongodbservicerunning
 
-cls
-
 . "c:\myworld\cgis\cgis-book\tests\testglobals.ps1"
 
 $mongoDBServiceName = "MongoDB"

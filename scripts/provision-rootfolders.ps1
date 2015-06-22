@@ -7,7 +7,7 @@ param(
     $projectRoot
 )
 
-$folderList = @("projects","scripts","data", "images")
+$folderList = @("projects","scripts","data", "images", "tests")
 $projectRoot = "C:\myworld\cgis\cgis-book"
 
 $rootFolderExists = test-path "C:\myworld\cgis\cgis-book"

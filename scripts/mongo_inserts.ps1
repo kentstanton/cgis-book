@@ -17,7 +17,7 @@ $layerArray += $cgisLayerecozoneboundaries
 
 
 import-module mdbc
-Connect-Mdbc . cgis cgis.data
+Connect-Mdbc . cgis cgis.data.layers
 
 
 foreach ($layer in $layerArray) {

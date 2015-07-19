@@ -1,82 +1,146 @@
 ﻿<#
 .Synopsis
-   Select a document, folder, or placemark in a KML and write a new file containg just that element.
-   REQUIRES Powershell 5.x
+    Script to assist with untangling a Google Earth MyPlaces file (that has gotten out of control)
+    Selects document, folder or placemark top-level entities in your myplaces file 
+        and writes new files containing just the elements of that type.
+
 
 .DESCRIPTION
-   Parse KML files and produce new files containing selected kml objects.
-   ParameterSets:
-   -rewrite <-selector ""> <-outputtype grid,list,file> <-file "path/filename">
-   -view <-selector ""> <-outputtype grid,list>
+    Parse KML files and produce new files containing selected kml objects.
+
+    Specify "all" to create new files for everything in your MyPlaces file.
+
+    Make a copy of your MyPlaces file and set the global path variables below to run the script.
+
+    IMPORTANT: This version of the script requires Powershell 5.0. See my github site for information
+        on versions that work with older versions of Powershell.
+
+    Developer Notes:
+    Using Powersheel 5.x classes to structure the code using composition and the factory pattern.
+    Execution starts with call to main at the end of the script.   
 
 .EXAMPLE
-   parse-kml -rewrite -file myfile.kml -selector "Moreau Lake State Park Trails"
+   parse-kml -sourceFileName myplaces_copy.kml -NodeTypeToSelect folder
+
+   Parse the KML file named myplaces_copy.kml in the current folder and outputs all top level folder nodes 
+    to new files in a sub-folder of the source file location. 
+   Overwrite defaults to false so if files exist in the output location, the process is halted.
 
 .EXAMPLE
-   parse-kml -view -selector "Moreau Lake State Park Trails" -output grid
+   parse-kml -sourceFileName myplaces_copy.kml -NodeTypeToSelect all -overwrite true
+
+   Parse the KML file named myplaces_copy.kml in the current folder and output all top level nodes 
+    to new files in a sub-folder of the source file location. 
+   Overwrite existing output files if any are found.
+
+.EXAMPLE
+   parse-kml -sourceFileName myplaces_copy.kml -path "c:\temp" -NodeTypeToSelect all -overwrite true
+
+   Parse the KML file named myplaces_copy.kml in the current folder and output all top level nodes 
+    to new files in a sub-folder of the source file location. 
+   Overwrite existing output files if any are found.
+
+
 #>
+
 param(
     [Parameter(Mandatory=$true)]
-    $NodeToSelect,
-    $KmlType,
-    $outputType
+    $SourceFileName,
+    [Parameter(Mandatory=$true)]
+    $NodeTypeToSelect,
+    [Parameter(Mandatory=$false)]
+    $AllowOverwrite = $false,
+    [Parameter(Mandatory=$false)]
+    $path = $(Convert-Path("."))
+
 )
 
+#####
+# Execution starts with the call to main() at the end of the script
+#####
 
-<#
-Developer Notes:
-The script is self-contained; all the code is present. Modularized code is available from my GitHub repo at:
-
-
-Using Powersheel 5.x classes to structure the code using composition and the factory pattern.
-
-Execution starts with call to main at the end of the script.
-    
-#>
-
+# PS 5.x is required.
 #Requires –Version 5
 Set-StrictMode -Version latest
-cls
 
-$myPlacesFileName = "myplaces.kml"
-$myPlacesFilePath = "C:\myworld\cgis\googleearth\"
-$myPlacesFilePathFull = "$myPlacesFilePath\$myPlacesFileName"
-$myPlacesFileKmlOutputPathFull = "$myPlacesFilePath\kmlfiles"
-$myPlacesHome = "C:\Users\kent\AppData\LocalLow\Google\GoogleEarth"
+# Stop on any error. Change this if you want to hanlde errors in a more granular way.
+$ErrorActionPreference = "Stop"
+
+CLS
+
+# Using standard input parameter names but keeping these internal names.
+# You can override the input parameters by changing these assignments with values approprite for your working environment.
+# The KML files created by the script go into a subfolder named below. 
+$myPlacesFileName = $SourceFileName
+$myPlacesFilePath = $path
+$OutputSubFolder = "kmlfiles"
 
 
-
-<#
-    todo - Read the local config from an answer file. 
+<# Build the paths for the input file and for output. Path validation is done here. 
+    Checking if overwriting is an issue is done here.
 #>
 class EnvironmentData {
     [string] $sourceFileName;
     [string] $sourcePath;
     [string] $sourceFullPath;
     [string] $outputPath;
-    [boolean] $sourcePathValid;
-    [boolean] $outputPathValid;
 
-    EnvironmentData([string] $SourcefileName, [string] $SourcePath, [string] $OutputPath) {
-        $This.sourceFileName = $SourcefileName;
-        $This.sourcePath = $SourcePath;
-        $This.sourceFullPath = "$($This.SourcePath)\$($This.SourceFileName)";
-        $This.outputPath = $outputPath;
+    EnvironmentData([string] $SourcefileName, [string] $SourcePath, [string] $OutputSubFolder, [boolean]$AllowOverwrite) {
+        try {
+            $This.sourceFileName = $SourcefileName;
+            
+            if ($SourcePath.EndsWith("\")) { 
+                $This.sourcePath = $SourcePath;
+            } else {
+                $This.sourcePath = "$($SourcePath)\";
+            }
+            $This.sourceFullPath = "$($This.SourcePath)$($This.SourceFileName)";
+            $This.outputPath = "$($This.sourcePath)$($OutputSubFolder)"
 
-        $This.ReportPathErrors()
+            # If the output folder does not exist, create it
+            if ($(test-path $This.outputPath) -eq $false) {
+                new-item -itemtype directory -force -Path $This.outputPath
+            }
+
+            $This.MakeOutputfolder($AllowOverwrite)
+            $This.ReportPathErrors()
+        } catch {
+            "Unhandled Exception: EnvironmentData - Error building the input and/or output paths."
+        }
+    }
+
+    MakeOutputfolder ($AllowOverwrite) {
+        $dateForName = $((Get-Date).ToShortDateString());
+        $dateForName = $dateForName.Replace("/", "_");
+        $pathWithSubFolder = "$($this.outputPath)\$($dateForName)"
+        
+        # brute 
+        if ($(test-path $pathWithSubFolder) -eq $true) {
+            $countFilesInOutputPath = @( Get-ChildItem $pathWithSubFolder).Count;
+            #= Get-ChildItem -Path $pathWithSubFolder -Include *.kml
+            if ( $($countFilesInOutputPath -ne 0) -and $($AllowOverwrite -eq $false)) {
+                Write-host "Error: You must pass $true for $AllowOverwrite OR the output folder must be empty. No files were written." -ForegroundColor red -BackgroundColor Yellow
+                Exit 4
+            }
+        } else {
+            New-Item -Path $pathWithSubFolder -type directory -ErrorAction SilentlyContinue
+            $This.outputPath = $pathWithSubFolder 
+        }
+        $This.outputPath = $pathWithSubFolder
     }
 
     ReportPathErrors() {
-        $This.sourcePathValid = test-path $This.SourceFullPath
-        if ($This.sourcePathValid -eq $false) {
-            write-host -foregroundcolor yellow -backgroundcolor red "Terminating Error: Full source path is invalid. $($This.sourceFullPath)"
+        if ($(test-path $This.SourceFullPath) -eq $false) {
+            write-host -foregroundcolor yellow -backgroundcolor red "Terminating Error: The Source path is invalid. $($This.sourceFullPath)"
+            Exit 2
         }
 
-        $This.OutPutPathValid = test-path $This.outputPath;
-        if ($This.OutPutPathValid -eq $false) {
-            write-host -foregroundcolor yellow -backgroundcolor red "Terminating Error: Output path is invalid. $($This.outputPath)"
+        if ($(test-path $This.outputPath) -eq $false) {
+            write-host -foregroundcolor yellow -backgroundcolor red "Terminating Error: The Output path is invalid. $($This.outputPath)"
+            Exit 2
         }
     }
+
 }
 
 
@@ -91,195 +155,160 @@ class KmlPoint {
 }
 
 
-class KmlPlacemarkEX {
-    [string] $kmlStyleIdentifier;
-
-    KmlPlacemarkEX([xml.xmlElement] $kmlDocElement) {
-        $this.kmlStyleIdentifier = $kmlDocElement.styleUrl;
-    }
-}
-
-class KmlFolderEX {
-    [string] $kmlStyleIdentifier;
-
-    KmlFolderEX([xml.xmlElement] $kmlDocElement) {
-        $this.kmlStyleIdentifier = "";
-    }
-}
-
-class KmlDocumentEX {
-    [string] $kmlStyleIdentifier;
-
-    KmlDocumentEX([xml.xmlElement] $kmlDocElement) {
-        $this.kmlStyleIdentifier = "";
-    }
-}
-
-
 class KmlPlacemark {
-    [xml.xmlElement] $kmlDoc;
-    [string] $kmlDocName;
-    [string] $kmlDocType;
-    [string] $kmlDocStyleIdentifier;
+    [string] $kmlStyleIdentifier;
+    [string] $kmlTypeIdentifier;
 
     KmlPlacemark([xml.xmlElement] $kmlDocElement) {
-        $this.kmlDoc = $kmlDocElement;
-        $this.kmlDocName = $this.kmlDoc.name;
-        $this.kmlDocType = "placemark"
+        $this.kmlStyleIdentifier = $kmlDocElement.styleUrl;
+        $this.kmlTypeIdentifier = "placemark";
     }
 }
 
-
-# a folder 
 class KmlFolder {
-    [xml.xmlElement] $kmlDoc;
-    [string] $kmlDocName;
-    [string] $kmlDocType;
-    [string] $kmlDocStyleIdentifier;
-    [string] $nodeParent;
+    [string] $kmlStyleIdentifier;
+    [string] $kmlTypeIdentifier;
 
     KmlFolder([xml.xmlElement] $kmlDocElement) {
-        $this.kmlDoc = $kmlDocElement;
-        $this.kmlDocName = $this.kmlDoc.name;
-        $this.kmlDocType = "folder"
-        $this.SetParent()
-    }
+        $this.kmlStyleIdentifier = "";
+        $this.kmlTypeIdentifier = "folder";
 
-    [void] SetParent() {
-        [string] $nodeParent = $this.kmlDoc.ParentNode
     }
 }
 
-# a document
 class KmlDocument {
-    [xml.xmlElement] $kmlDoc;
-    [string] $kmlDocName;
-    [string] $kmlDocType;
-    [string] $kmlDocStyleIdentifier;
-    [string] $kmlInnerXml;
-    [string] $kmlSnippet;
+    [string] $kmlStyleIdentifier;
+    [string] $kmlTypeIdentifier;
 
-    # constructor
-    kmldocument([xml.xmlElement] $kmlDocElement) {
-        $this.kmlDoc = $kmlDocElement;
-        $this.kmlDocName = $this.kmlDoc.name;
-        $this.kmlDocType = "document"
+    KmlDocument([xml.xmlElement] $kmlDocElement) {
+        $this.kmlStyleIdentifier = "";
+        $this.kmlTypeIdentifier = "document";
+
     }
 }
 
-# factory
+
+
+
+# Node Factory using Powershell 5
 class KmlNodeFactory {
     [xml.xmlElement] $xml;
     [string] $kmlNodeName;
-    [string] $kmlNodeType;
-    $TypedNode;
+    [object] $TypedNode;
     [xml.xmlElement] $parentNode;
     [Boolean]$selectedNode = $false;
 
-    # constructor
-    KmlNodeFactory([xml.xmlElement] $xmlElement, $nodeType, [string] $nodeToSelect, $SelectedNodes) {
-        $this.xml = $xmlElement;
-        $this.kmlNodeName = $this.xml.name;
-        $this.kmlNodeType = $nodeType
-        $this.parentNode = $xmlElement.ParentNode;
-        $this.SelectedNode
+    KmlNodeFactory([xml.xmlElement] $xmlElement, [string] $nodeTypeName, [string] $NodeTypeToSelect) {
+        try {
+            $this.xml = $xmlElement;
 
-        Switch ($nodeType) {
-            "Placemark" {$this.TypedNode = [KmlPlacemarkEX]::new($this.xml)}
-            "Folder" {$this.TypedNode = [KmlFolderEX]::new($this.xml)}
-            "Document" {$this.TypedNode = [KmlDocumentEX]::new($this.xml);}
+            # need a better way to handle this...
+            if ($this.xml.name.GetType().Name -eq "XmlElement") {
+                $this.kmlNodeName = $this.xml.name.'#text'
+            } else {
+                $this.kmlNodeName = $this.xml.name;
+            }
+            $this.parentNode = $xmlElement.ParentNode;
+            $this.SelectedNode
+
+            Switch ($nodeTypeName) {
+                "Placemark" {$this.TypedNode = [KmlPlacemark]::new($this.xml)}
+                "Folder" {$this.TypedNode = [KmlFolder]::new($this.xml)}
+                "Document" {$this.TypedNode = [KmlDocument]::new($this.xml);}
+            }
+
+            if ($NodeTypeToSelect.ToLower() -eq "all") {
+                $this.selectedNode = $true;
+            } elseif ($NodeTypeToSelect -ne "" -and ($this.TypedNode.kmlTypeIdentifier.ToLower() -eq $NodeTypeToSelect.ToLower()) ) {
+                $this.selectedNode = $true;    
+            }
+
+            $AllNodesList += $this;
+        } catch {
+            Write-host "Terminating Error: KmlNodeFactory" -BackgroundColor Red -ForegroundColor Yellow
+            $_.Exception.Message;
+            Exit 3;
         }
 
-
-        if ($nodeToSelect -ne "" -and $this.kmlNodeName.ToLower() -eq $nodeToSelect.ToLower()) {
-            $this.selectedNode = $true;    
-        }
-
-        $AllNodesList += $this;
     }
 
 }
 
 
+# Brute force approach to building up the output XML
+# Todo: wrap this in a kmlwriter class
 function AddContentToKmlTemplate($selectedNodes) {
 $kmlNamespaces = @'
 <?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2" xmlns:kml="http://www.opengis.net/kml/2.2" xmlns:atom="http://www.w3.org/2005/Atom">
 '@
     
-    #$templatedKml = $kmlNamespaces + $selectedNodes.xml.Innerxml + "</kml>"
-    $nodeTypeStartTag = "<$($selectedNodes.kmlNodeType)>"
-    $nodeTypeEndTag = "</$($selectedNodes.kmlNodeType)>"
-    $templatedKml = "$($kmlNamespaces)$($nodeTypeStartTag)$($selectedNodes.xml.Innerxml)$($nodeTypeEndTag)</kml>"
-    return $templatedKml
-}
-
-
-function write-kmlEx($selectedNodes) {
-# for each node
-# create a folder nodetype_nodename ex: folder_vernalpool
-# write the base kml file to the folder
-# copy any referenced resources into the folder
-
-    foreach($node in $selectedNodes) {
-        $folderExists = test-path 
-    }
-}
-
-function write-kml($selectedNodes) {
-    
-    # if the folder does not exist, create it
-    New-Item $myPlacesFileKmlOutputPathFull -type directory -ErrorAction SilentlyContinue
-
-    if ($selectedNodes.kmlNodeName -eq "") {
-        write-host "We don't have a node name. We really ought to just stop here."
-    } else {
-        # not going to allow spaces in file names
-        $kmlPlaceFileName = ($selectedNodes.kmlNodeName).replace(" ", "_");
+    try {  
+        $nodeTypeStartTag = "<$($selectedNodes.TypedNode.kmlTypeIdentifier)>"
+        $nodeTypeEndTag = "</$($selectedNodes.TypedNode.kmlTypeIdentifier)>"
+        $templatedKml = "$($kmlNamespaces)$($nodeTypeStartTag)$($selectedNodes.xml.Innerxml)$($nodeTypeEndTag)</kml>"
+        return $templatedKml
+    } catch {
+        Write-host "Terminating Error: AddContentToKmlTemplate" -BackgroundColor Red -ForegroundColor Yellow
+        $_.Exception.Message;
+        Exit 4;
     }
 
-    # if the file exists, make a copy backup_filename.kml
-    $fulloutputPath = "$myPlacesFileKmlOutputPathFull\$kmlPlaceFileName.kml";
-    if ( (test-path $fulloutputPath) -eq $true) {
-        write-host -ForegroundColor Black -BackgroundColor Yellow  "File Not written. $fulloutputPath exists. Specify overwrite to replace."
-        $uniqueFileName = "backup`_$kmlPlaceFileName";
-        $backupfulloutputPath = "$myPlacesFileKmlOutputPathFull\$uniqueFileName"
-        Copy-Item $fulloutputPath $backupfulloutputPath
-    } else {
-        write-host "$fulloutputPath does not exist"
-    }
-    
-    foreach($node in $selectedNodes) {
-        $templatedKmlContent = AddContentToKmlTemplate $node
-        $templatedKmlContent | Set-Content $fulloutputPath
-    }
 }
 
 
 <#
-    This could be refactored to incorporate the parsing 
-    into the node classes themseleves. But this will be rewritten 
-    with the core functionality provided by CmdLets written in C# so
-    leaving it as is.  
+    Create a sub-folder using today's date as the name. Nodes are written as files in this folder.
+    # Todo: wrap this in a kmlwriter class
+#>
+function WriteKml($selectedNodes, $env) {
+    
+    try {
+
+        foreach($nodeToWrite in $selectedNodes) {
+            if ($nodeToWrite.kmlNodeName -eq "") {
+                write-host "Warning: No name found for the node to write. We really ought to just stop here but we'll try the next one."
+            } else {
+                # not going to allow spaces in file names
+                $kmlPlaceFileName = ($nodeToWrite.kmlNodeName).replace(" ", "_");
+            }
+
+            $fullOutputPath = "$($env.outputpath)\$($kmlPlaceFileName).kml";
+
+            foreach($node in $nodeToWrite) {
+                $templatedKmlContent = AddContentToKmlTemplate $node
+                $templatedKmlContent | Set-Content $fullOutputPath
+            }
+
+        }    
+    } catch {
+        "Unhandled Exception: WriteKml"
+    }
+
+
+}
+
+
+<#
+    This should/could be refactored to incorporate the parsing 
+    into the factory class. My intent is to rewrite this  
+    with the core functionality provided by CmdLets written in C#. 
+    Pending that this is OK as is.  
 #>
 Function Main($envData) {
-    [xml]$kmlFileContent = get-content $myPlacesFilePathFull
+
+    [xml]$kmlFileContent = get-content $envData.sourceFullPath -ErrorAction Continue
 
     $KmlDocumentsList = @()
     $KmlFoldersList = @()
     $KmlPlacemarksList = @()
     $AllNodesList = @()
     $SelectedNodes = @()
-
-    <#
-    Using the Powershell xml adapter syntax. Tried to do this using xpath but ran 
-    into a gotcha with the KML namespace references sa saved by Google Earth. Turns
-    out the PS xml syntax is frieghteningly convenient.
-    #>
+        
     $kmlPlacemarks = $kmlFileContent.kml.Document.folder.Placemark
     Write-host "`nProcessing Placemarks" -BackgroundColor DarkRed
     foreach ($KmlPlacemark in $kmlPlacemarks) {
-        $PlaceMarkNode = [KmlNodeFactory]::new($KmlPlacemark, "Placemark", $NodeToSelect, $SelectedNodes);
+        $PlaceMarkNode = [KmlNodeFactory]::new($KmlPlacemark, "Placemark", $NodeTypeToSelect);
         $KmlPlacemarksList += $PlaceMarkNode
         $AllNodesList += $PlaceMarkNode
         if ($PlaceMarkNode.SelectedNode) {
@@ -290,7 +319,7 @@ Function Main($envData) {
     $kmlDocuments = $kmlFileContent.kml.Document.folder.Document;
     Write-host "`nProcessing Documents" -BackgroundColor DarkRed
     foreach ($KmlDocument in $kmlDocuments) {
-        $DocumentNode = [KmlNodeFactory]::new($KmlDocument, "Document", $NodeToSelect,$SelectedNodes);
+        $DocumentNode = [KmlNodeFactory]::new($KmlDocument, "Document", $NodeTypeToSelect);
         $KmlDocumentsList += $DocumentNode
         $AllNodesList += $DocumentNode
         if ($DocumentNode.SelectedNode) {
@@ -301,7 +330,7 @@ Function Main($envData) {
     $kmlFolders = $kmlFileContent.kml.Document.Folder.Folder;
     Write-host "`nProcessing Folders" -BackgroundColor DarkRed
     foreach ($kmlFolder in $kmlFolders) {
-        $FolderNode = [KmlNodeFactory]::new($KmlFolder, "Folder",$NodeToSelect,$SelectedNodes);
+        $FolderNode = [KmlNodeFactory]::new($KmlFolder, "Folder",$NodeTypeToSelect);
         $KmlFoldersList += $FolderNode
         $AllNodesList += $FolderNode
         if ($FolderNode.SelectedNode) {
@@ -314,19 +343,16 @@ Function Main($envData) {
         #write-host "No nodes met the selection criteria"
         $AllNodesList | Out-GridView
     } else {
-        write-kml $SelectedNodes
+        WriteKml $SelectedNodes $envData
         $SelectedNodes | Out-GridView
     }
 
 }
 
-# global data
 
-$EnvData = [EnvironmentData]::new($myPlacesFileName,$myPlacesFilePath,$myPlacesFileKmlOutputPathFull);
+# load the paths and other globals into an object
+$Configuration = [EnvironmentData]::new($myPlacesFileName,$myPlacesFilePath,$OutputSubFolder, $AllowOverwrite);
 
-
-# Call main to start processing
-
-Main $EnvData
+Main $Configuration $overWrite
 
 
